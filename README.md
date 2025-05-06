@@ -117,7 +117,7 @@ This feature introduces a new built-in function `write(filename, text, append = 
 1. **Clone OpenSCAD**:
 
   ```bash
-  git clone https://github.com/openscad/openscad
+  git clone https://github.com/Dante-U/openscad.git  
   cd openscad
   ```
 
