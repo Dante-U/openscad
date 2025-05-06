@@ -157,6 +157,131 @@ void handle_triangle_color(const std::shared_ptr<const PolySet>& ps, ExportConte
 /*
  * PolySet must be triangulated.
  */
+
+
+ /*
+ * PolySet must be triangulated.
+ */
+bool append_polyset(const std::shared_ptr<const PolySet>& ps, ExportContext& ctx)
+{
+  try {
+    // Group triangles by color
+    std::unordered_map<int, std::vector<size_t>> color_triangle_map;
+    for (size_t i = 0; i < ps->indices.size(); i++) {
+      int color_index = i < ps->color_indices.size() ? ps->color_indices[i] : -1;
+      color_triangle_map[color_index].push_back(i);
+    }
+
+    // Create a mesh for each color
+    for (const auto& [color_index, triangle_indices] : color_triangle_map) {
+      auto mesh = ctx.model->AddMeshObject();
+      if (!mesh) {
+        export_3mf_error("Failed to create mesh object.");
+        return false;
+      }
+
+      // Set mesh name
+      const int mesh_count = count_mesh_objects(ctx.model);
+      const auto modelname = ctx.modelcount == 1 ? "OpenSCAD Model" : "OpenSCAD Model " + std::to_string(mesh_count);
+      const auto partname = ctx.modelcount == 1 ? "" : "Part " + std::to_string(mesh_count);
+      mesh->SetName(modelname);
+
+      // Log color information
+      if (color_index >= 0 && !ps->colors.empty()) {
+        const Color4f col = ps->colors[color_index];
+        LOG(message_group::Echo, "Exporting mesh object %1$d with color: R=%2$f, G=%3$f, B=%4$f, A=%5$f",
+            mesh_count, col[0], col[1], col[2], col[3]);
+      } else {
+        LOG(message_group::Echo, "Exporting mesh object %1$d with no color", mesh_count);
+      }
+
+      // Map vertices to new indices
+      std::unordered_map<size_t, Lib3MF_uint32> vertex_map;
+      std::vector<Vector3d> used_vertices;
+
+      // Collect unique vertices used by triangles of this color
+      for (const auto& tri_idx : triangle_indices) {
+        const auto& indices = ps->indices[tri_idx];
+        for (const auto& v_idx : indices) {
+          if (vertex_map.find(v_idx) == vertex_map.end()) {
+            vertex_map[v_idx] = vertex_map.size();
+            used_vertices.push_back(ps->vertices[v_idx]);
+          }
+        }
+      }
+
+      // Add vertices to mesh
+      for (const auto& coords : used_vertices) {
+        const auto f = coords.cast<float>();
+        try {
+          const Lib3MF::sPosition v{f[0], f[1], f[2]};
+          mesh->AddVertex(v);
+        } catch (Lib3MF::ELib3MFException& e) {
+          export_3mf_error(e.what());
+          return false;
+        }
+      }
+
+      // Add triangles to mesh
+      for (const auto& tri_idx : triangle_indices) {
+        const auto& indices = ps->indices[tri_idx];
+        try {
+          const Lib3MF_uint32 triangle = mesh->AddTriangle({
+              vertex_map[indices[0]],
+              vertex_map[indices[1]],
+              vertex_map[indices[2]]
+          });
+
+          // Assign color to the entire mesh
+          if (color_index >= 0 && !ps->colors.empty() && (ctx.colorgroup || ctx.basematerialgroup)) {
+            const Color4f col = ps->colors[color_index];
+            Lib3MF_uint32 col_idx = 0;
+            auto col_it = ctx.colors.find(col);
+            if (col_it == ctx.colors.end()) {
+              const Lib3MF::sColor materialcolor{
+                  .m_Red = get_color_channel(col, 0),
+                  .m_Green = get_color_channel(col, 1),
+                  .m_Blue = get_color_channel(col, 2),
+                  .m_Alpha = get_color_channel(col, 3)
+              };
+              if (ctx.basematerialgroup) {
+                col_idx = ctx.basematerialgroup->AddMaterial("Color " + std::to_string(ctx.basematerialgroup->GetCount()), materialcolor);
+              } else if (ctx.colorgroup) {
+                col_idx = ctx.colorgroup->AddColor(materialcolor);
+              }
+              ctx.colors[col] = col_idx;
+            } else {
+              col_idx = col_it->second;
+            }
+
+            Lib3MF_uint32 res_id = ctx.basematerialgroup ? ctx.basematerialgroup->GetUniqueResourceID() : ctx.colorgroup->GetUniqueResourceID();
+            mesh->SetObjectLevelProperty(res_id, col_idx);
+          }
+        } catch (Lib3MF::ELib3MFException& e) {
+          export_3mf_error(e.what());
+          return false;
+        }
+      }
+
+      // Add build item
+      try {
+        auto builditem = ctx.model->AddBuildItem(mesh.get(), ctx.wrapper->GetIdentityTransform());
+        if (!partname.empty()) {
+          builditem->SetPartNumber(partname);
+        }
+      } catch (Lib3MF::ELib3MFException& e) {
+        export_3mf_error(e.what());
+        return false;
+      }
+    }
+  } catch (Lib3MF::ELib3MFException& e) {
+    export_3mf_error(e.what());
+    return false;
+  }
+  return true;
+}
+
+/*
 bool append_polyset(const std::shared_ptr<const PolySet>& ps, ExportContext& ctx)
 {
   try {
@@ -235,6 +360,7 @@ bool append_polyset(const std::shared_ptr<const PolySet>& ps, ExportContext& ctx
   }
   return true;
 }
+  */
 
 #ifdef ENABLE_CGAL
 bool append_nef(const CGAL_Nef_polyhedron& root_N, ExportContext& ctx)
