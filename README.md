@@ -130,7 +130,7 @@ This feature introduces a new built-in function `write(filename, text, append = 
   mkdir build
   cd build
   cmake ..
-  make
+  make -j$(sysctl -n hw.ncpu)
   ```
 
 4. **Test**:
